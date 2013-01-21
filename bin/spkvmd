@@ -65,25 +65,83 @@ class SPKVMD
 			loop do
 				if session = server.accept
 					Thread.new do
-						puts "\t[#{Thread.current}] - session opened"
-						session.print("spkvmd welcome you\n")
-						loop do
-							cmd, arg = session.gets.chomp.split
-							if cmd == 'quit'
-								session.close
-								puts "\t[#{Thread.current}] - session closed"
-								break
-							else
-								session.puts('Unknown command')
+						begin
+							puts "\t[#{Thread.current}] - session opened"
+							session.print("spkvmd welcome you\n")
+							loop do
+								cmd, arg = read_s(session)
+								if cmd == 'quit'
+									session.close
+									puts "\t[#{Thread.current}] - session closed"
+									break
+								elsif cmd == 'kvm'
+									operate_kvm(session)
+								else
+									session.puts('Unknown command')
+								end
 							end
+							Thread.close
+						rescue
+							puts $!
 						end
-						Thread.close
 					end
 				end
 			end
 		rescue
 			raise "Can't create new TCPServer: #{$!}"
 		end
+	end
+
+	def read_s(session)
+		session.gets.chomp.split
+	end
+
+	def operate_kvm(session)
+		puts "\t\t[#{Thread.current}] - enter kvm operator"
+		session.puts('kvm operator')
+		kvm = KVM.new
+		loop do
+			cmd, arg = read_s(session)
+			if cmd == 'quit'
+				puts "\t\t[#{Thread.current}] - quit kvm operator"
+				break
+			elsif cmd == 'list'
+				kvm.list
+			end
+		end
+	end
+end
+
+class KVM
+	def initialize
+		raise "kvm or vm_dir not configured" if !$params['kvm'] || !$params['vm_dir']
+		if File.exist?($params['kvm'])
+			@kvm_bin = $params['kvm']
+		else
+			raise "kvm not found"
+		end
+		if Dir.exist?($params['vm_dir'])
+			@vm_dir = $params['vm_dir']
+		else
+			raise "virtual machines directory not found"
+		end
+	end
+
+	def list
+		puts "\t\t\t[#{Thread.current}] - listing vm"
+		puts Dir.entries(@vm_dir)	
+	end
+
+	def info(vm)
+	end
+
+	def start(vm)
+	end
+
+	def stop(vm)
+	end
+
+	def config(vm)
 	end
 end
 ##### PROGRAM ######################################################
