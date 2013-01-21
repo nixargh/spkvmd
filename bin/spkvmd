@@ -57,12 +57,41 @@ def find_bool(string)
 	end
 end
 ##### CLASSES ######################################################
-
+class SPKVMD
+	def initialize
+		begin
+			require 'socket'
+			server = TCPServer.new($params['tcp_addr'],$params['tcp_port'])
+			loop do
+				if session = server.accept
+					Thread.new do
+						puts "\t[#{Thread.current}] - session opened"
+						session.print("spkvmd welcome you\n")
+						loop do
+							cmd, arg = session.gets.chomp.split
+							if cmd == 'quit'
+								session.close
+								puts "\t[#{Thread.current}] - session closed"
+								break
+							else
+								session.puts('Unknown command')
+							end
+						end
+						Thread.close
+					end
+				end
+			end
+		rescue
+			raise "Can't create new TCPServer: #{$!}"
+		end
+	end
+end
 ##### PROGRAM ######################################################
 begin
 	if os? == 'linux'
 		get_program_root_dir!
 		read_conf!
+		SPKVMD.new
 	else
 		raise "Only for Linux"
 	end
