@@ -23,7 +23,6 @@ end
 
 def get_program_root_dir!
         $prog_dir = File.expand_path(File.dirname(__FILE__)).gsub!("/#{@bin_dir}",'')
-		puts $prog_dir
 end
 
 def read_conf!
@@ -44,7 +43,7 @@ def read_conf!
 			raise "Configuration file (#{conf_file}) not found!"
 		end
 	else
-		raise "Config directory (#@conf_dir{}) not found!"
+		raise "Config directory (#{@conf_dir}) not found!"
 	end
 end
 
@@ -66,8 +65,6 @@ end
 class SPKVMD
 	def initialize
 		begin
-			#@current_lvl = 'ROOT'
-			#@previous_lvl = nil
 			require 'socket'
 			@server = TCPServer.new($params['tcp_addr'],$params['tcp_port'])
 		rescue
@@ -101,13 +98,16 @@ class Session
 					break
 				elsif cmd == 'kvm'
 					operate_kvm(session)
+				elsif cmd == 'ks'
+					session.close
+					exit
 				else
 					puts_to_c(session, 'Unknown command')
 				end
 			end
-			Thread.close
+			Thread.exit
 		rescue
-			puts $!
+			puts "session initialize error: #{$!}"
 		end
 	end
 
@@ -128,11 +128,21 @@ private
 				return_to_lvl!
 				puts "\t\t[#{Thread.current}] - exit #{@previous_lvl}"
 				break
-			elsif cmd == 'quit'
-				quit(session)
-				break
+#			elsif cmd == 'quit'
+#				quit(session)
+#				break
 			elsif cmd == 'list'
 				puts_to_c(session, kvm.list)
+			elsif cmd == 'start'
+				begin
+					pid = kvm.start(arg)
+					puts "\t\t\t[#{Thread.current}] - VM=#{arg} started (pid=#{pid})"
+					puts_to_c(session, "#{arg} - started (#{pid})")
+				rescue
+					error = $!
+					puts "\t\t\t[#{Thread.current}] - failed to start VM=#{arg}: #{error}"
+					puts_to_c(session, "#{arg} - failed to start: #{error}")
+				end
 			else
 				puts_to_c(session, 'Unknown command')
 			end
@@ -162,7 +172,7 @@ class KVM
 		if File.exist?($params['kvm'])
 			@kvm_bin = $params['kvm']
 		else
-			raise "kvm not found"
+			raise "kvm binary not found"
 		end
 		if Dir.exist?($params['vm_dir'])
 			@vm_dir = $params['vm_dir']
@@ -180,6 +190,18 @@ class KVM
 	end
 
 	def start(vm)
+		start_script = "#{$params['vm_dir']}/#{vm}/#{$params['start_script']}"
+		start_cmd =  read_start_script(start_script)
+		puts "\t\t\t[#{Thread.current}] - starting VM=#{vm}" 
+		pid = fork { 
+			exec(*start_cmd)
+			# i'll never be here
+		 }
+		#puts "i'm a parent: my_pid=#$$; child_pid=#{pid}" 
+		Process.detach(pid)
+		sleep 1
+		Process.kill(0, pid)
+		pid
 	end
 
 	def stop(vm)
@@ -192,14 +214,28 @@ private
 	
 
 	def get_vm_list
-		vm_list = Dir.entries($params['vm_dir']).delete('.').delete('..')
+		vm_list = Dir.entries($params['vm_dir'])
+		vm_list.delete('.')
+		vm_list.delete('..')
+		vm_list
+	end
+
+	def read_start_script(file)
+		start_cmd = nil
+		IO.read(file).each_line{|line|
+			if line.index('#') != 0
+				start_cmd = line.delete('&')
+				start_cmd = start_cmd.split(' ')
+				break
+			end
+		}
+		start_cmd ? start_cmd : raise("VM starting string not found")
 	end
 
 end
 ##### PROGRAM ######################################################
 begin
 	if os? == 'linux'
-		puts `pwd`
 		get_program_root_dir!
 		read_conf!
 		spkvmd = SPKVMD.new
