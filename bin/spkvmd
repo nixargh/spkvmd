@@ -2,16 +2,16 @@
 # encoding: utf-8
 # small personal kvm daemon
 # (*w)
-$version = "0.0.2"
+$version = "0.0.3"
 ##### SETTINGS #####################################################
 $params = nil
-@conf_dir = 'config'
-@bin_dir = 'bin'
-@conf_file = 'spkvmd.conf'
+@conf_dir = 'config' # config directory
+@bin_dir = 'bin' # binary directory
+@conf_file = 'spkvmd.conf' # config file name
 ##### REQUIRE ######################################################
 ##### MODULES ######################################################
 ##### FUNCTIONS ####################################################
-def os?
+def os? # detect OS
 	if RUBY_PLATFORM.downcase.include?("linux")
 		$os = 'linux'
 	elsif RUBY_PLATFORM.downcase.include?("darwin")
@@ -21,11 +21,11 @@ def os?
 	end
 end
 
-def get_program_root_dir!
+def get_program_root_dir! # detect program root directory
         $prog_dir = File.expand_path(File.dirname(__FILE__)).gsub!("/#{@bin_dir}",'')
 end
 
-def read_conf!
+def read_conf! # read configuration file
 	if Dir.exist?(@conf_dir)
         	conf_file = $prog_dir + '/' + @conf_dir + '/' + @conf_file
 		if File.exist?(conf_file)
@@ -47,7 +47,7 @@ def read_conf!
 	end
 end
 
-def find_bool(string)
+def find_bool(string) # convert string to boolean
 	if string == 'true'
 		true
 	elsif string == 'false'
@@ -57,12 +57,8 @@ def find_bool(string)
 	end
 end
 
-def quit(session)
-	session.close
-	puts "\t[#{Thread.current}] - session closed"
-end
 ##### CLASSES ######################################################
-class SPKVMD
+class SPKVMD # main class
 	def initialize
 		begin
 			require 'socket'
@@ -72,40 +68,39 @@ class SPKVMD
 		end
 	end
 
-	def accept_sessions!
+	def accept_sessions! # start new thread for each connection
 		loop do
-			if session = @server.accept
-				Thread.new do
-					Session.new(session)
-				end
+			Thread.abort_on_exception=true
+			Thread.start(@server.accept) do |session|
+				Session.new(session)
+				session.close
+				puts "\t[#{Thread.current}] - session closed"
 			end
 		end
 	end
 end
 
-class Session
+class Session # class to work with sessions
 	def initialize(session)
 		@current_lvl = 'ROOT'
 		@previous_lvl = nil
+		@session = session
 		begin
 			puts "\t[#{Thread.current}] - session opened"
-			session.puts("-= spkvmd welcome you =-")
+			@session.puts("-= spkvmd welcome you =-")
 			loop do
-				puts_to_c(session, nil)
-				cmd, arg = read_s(session)
+				puts_to_c(nil)
+				cmd, arg = read_s
 				if cmd == 'quit'
-					quit(session)
 					break
 				elsif cmd == 'kvm'
-					operate_kvm(session)
+					operate_kvm
 				elsif cmd == 'ks'
-					session.close
 					exit
 				else
-					puts_to_c(session, 'Unknown command')
+					puts_to_c('Unknown command')
 				end
 			end
-			Thread.exit
 		rescue
 			puts "session initialize error: #{$!}"
 		end
@@ -113,52 +108,49 @@ class Session
 
 private
 
-	def read_s(session)
-		session.gets.chomp.split
+	def read_s # format input from session
+		@session.gets.chomp.split
 	end
 
-	def operate_kvm(session)
+	def operate_kvm # KVM operations
 		chlvl!('KVM_OPERATOR')
 		puts "\t\t[#{Thread.current}] - enter #{@current_lvl}"
-		puts_to_c(session, nil)
+		puts_to_c(nil)
 		kvm = KVM.new
 		loop do
-			cmd, arg = read_s(session)
+			cmd, arg = read_s
 			if cmd == 'back'
 				return_to_lvl!
 				puts "\t\t[#{Thread.current}] - exit #{@previous_lvl}"
 				break
-#			elsif cmd == 'quit'
-#				quit(session)
-#				break
 			elsif cmd == 'list'
-				puts_to_c(session, kvm.list)
+				puts_to_c(kvm.list)
 			elsif cmd == 'start'
 				begin
 					pid = kvm.start(arg)
 					puts "\t\t\t[#{Thread.current}] - VM=#{arg} started (pid=#{pid})"
-					puts_to_c(session, "#{arg} - started (#{pid})")
+					puts_to_c("#{arg} - started (#{pid})")
 				rescue
 					error = $!
 					puts "\t\t\t[#{Thread.current}] - failed to start VM=#{arg}: #{error}"
-					puts_to_c(session, "#{arg} - failed to start: #{error}")
+					puts_to_c("#{arg} - failed to start: #{error}")
 				end
 			else
-				puts_to_c(session, 'Unknown command')
+				puts_to_c('Unknown command')
 			end
 		end
 	end
 
-	def puts_to_c(session, string)
-		session.puts("[#{@current_lvl}]: #{string}")
+	def puts_to_c(string) # formated output to session
+		@session.puts("[#{@current_lvl}]: #{string}")
 	end
 
-	def chlvl!(new_lvl)
+	def chlvl!(new_lvl) # changing current menu level
 		@previous_lvl = @current_lvl
         @current_lvl = new_lvl
 	end
 
-	def return_to_lvl!
+	def return_to_lvl! # returning to previos menu level
 		a = @current_lvl
 		@current_lvl = @previous_lvl
 		@previous_lvl = a
@@ -166,7 +158,7 @@ private
 
 end
 
-class KVM
+class KVM # class to work with KVM
 	def initialize
 		raise "kvm or vm_dir not configured" if !$params['kvm'] || !$params['vm_dir']
 		if File.exist?($params['kvm'])
@@ -181,51 +173,56 @@ class KVM
 		end
 	end
 
-	def list
+	def list # list virtual machines
 		puts "\t\t\t[#{Thread.current}] - listing vm"
 		get_vm_list
 	end
 
-	def info(vm)
+	def info(vm) # information about virtual machine
 	end
 
-	def start(vm)
+	def start(vm) # start virtual machine
 		start_script = "#{$params['vm_dir']}/#{vm}/#{$params['start_script']}"
 		start_cmd =  read_start_script(start_script)
 		puts "\t\t\t[#{Thread.current}] - starting VM=#{vm}" 
-		pid = fork { 
-			exec(*start_cmd)
-			# i'll never be here
-		 }
-		#puts "i'm a parent: my_pid=#$$; child_pid=#{pid}" 
-		Process.detach(pid)
-		sleep 1
-		Process.kill(0, pid)
-		pid
+		`#{start_cmd}`
+		pid = nil
 	end
 
-	def stop(vm)
+	def stop(vm) # stop virtual machine
 	end
 
-	def config(vm)
+	def config(vm) # configure virtual machine
 	end
 
 private
 	
+	def daemonize # daemonize something spesified in block
+		fork {
+			Process.setsid
+			exit if fork
+			Dir.chdir('/')
+			STDIN.reopen('/dev/null')
+			STDOUT.reopen('/dev/null')
+			STDERR.reopen('/dev/null')
+			trap("TERM"){exit}
+			yield
+		}
+	end
 
-	def get_vm_list
+	def get_vm_list # read subdirectories from virtual machines root directory
 		vm_list = Dir.entries($params['vm_dir'])
 		vm_list.delete('.')
 		vm_list.delete('..')
 		vm_list
 	end
 
-	def read_start_script(file)
+	def read_start_script(file) # read script that start virtual machine from virtual machine folder
 		start_cmd = nil
 		IO.read(file).each_line{|line|
 			if line.index('#') != 0
 				start_cmd = line.delete('&')
-				start_cmd = start_cmd.split(' ')
+				#start_cmd = start_cmd.split(' ')
 				break
 			end
 		}
