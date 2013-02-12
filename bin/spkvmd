@@ -2,9 +2,10 @@
 # encoding: utf-8
 # small personal kvm daemon
 # (*w)
-$version = "0.0.3"
+VERSION = "0.0.4"
 ##### SETTINGS #####################################################
 $params = nil
+$kvm_vm_list = nil
 @conf_dir = 'config' # config directory
 @bin_dir = 'bin' # binary directory
 @conf_file = 'spkvmd.conf' # config file name
@@ -78,6 +79,18 @@ class SPKVMD # main class
 			end
 		end
 	end
+
+	def refresh_kvm_vm_list!
+		Thread.new do
+			puts "Starting KVM VM list updater..."
+			kvm = KVM.new
+			loop do
+				$kvm_vm_list = kvm.get_vm_list
+				puts "\t[KVM_VM_UPDATER] KVM VM list updated."
+				sleep 5
+			end
+		end
+	end
 end
 
 class Session # class to work with sessions
@@ -116,28 +129,40 @@ private
 		chlvl!('KVM_OPERATOR')
 		puts "\t\t[#{Thread.current}] - enter #{@current_lvl}"
 		puts_to_c(nil)
-		kvm = KVM.new
-		loop do
-			cmd, arg = read_s
-			if cmd == 'back'
-				return_to_lvl!
-				puts "\t\t[#{Thread.current}] - exit #{@previous_lvl}"
-				break
-			elsif cmd == 'list'
-				puts_to_c(kvm.list)
-			elsif cmd == 'start'
-				begin
-					pid = kvm.start(arg)
-					puts "\t\t\t[#{Thread.current}] - VM=#{arg} started (pid=#{pid})"
-					puts_to_c("#{arg} - started (#{pid})")
-				rescue
-					error = $!
-					puts "\t\t\t[#{Thread.current}] - failed to start VM=#{arg}: #{error}"
-					puts_to_c("#{arg} - failed to start: #{error}")
+		begin
+			kvm = KVM.new
+			loop do
+				cmd, arg = read_s
+				if cmd == 'back'
+					return_to_lvl!
+					puts "\t\t[#{Thread.current}] - exit #{@previous_lvl}"
+					break
+				elsif cmd == 'list'
+					vm_list = $kvm_vm_list
+					puts "\t\t\t[#{Thread.current}] - listing vm: #{vm_list}"
+					puts_to_c(vm_list)
+				elsif cmd == 'start'
+					begin
+						vm = arg
+						print "\t\t\t[#{Thread.current}] - starting VM=#{vm} - " 
+						result = kvm.start(vm)
+						if result == []
+							puts "[OK]"
+							puts_to_c("#{vm} - started")
+						else
+							raise result.to_s
+						end
+					rescue
+						error = $!
+						puts "[FAILED] (#{error})"
+						puts_to_c("#{vm} - failed to start: #{error}")
+					end
+				else
+					puts_to_c('Unknown command')
 				end
-			else
-				puts_to_c('Unknown command')
 			end
+		rescue
+			puts "KVM_OPERATOR error: #{$!.backtrace}"
 		end
 	end
 
@@ -174,7 +199,6 @@ class KVM # class to work with KVM
 	end
 
 	def list # list virtual machines
-		puts "\t\t\t[#{Thread.current}] - listing vm"
 		get_vm_list
 	end
 
@@ -182,11 +206,13 @@ class KVM # class to work with KVM
 	end
 
 	def start(vm) # start virtual machine
+		result = nil
 		start_script = "#{$params['vm_dir']}/#{vm}/#{$params['start_script']}"
 		start_cmd =  read_start_script(start_script)
-		puts "\t\t\t[#{Thread.current}] - starting VM=#{vm}" 
-		`#{start_cmd}`
-		pid = nil
+		IO.popen([*start_cmd, :err=>[:child, :out]]){|io|
+			result = io.readlines
+		}
+		result
 	end
 
 	def stop(vm) # stop virtual machine
@@ -195,34 +221,40 @@ class KVM # class to work with KVM
 	def config(vm) # configure virtual machine
 	end
 
-private
-	
-	def daemonize # daemonize something spesified in block
-		fork {
-			Process.setsid
-			exit if fork
-			Dir.chdir('/')
-			STDIN.reopen('/dev/null')
-			STDOUT.reopen('/dev/null')
-			STDERR.reopen('/dev/null')
-			trap("TERM"){exit}
-			yield
-		}
-	end
-
 	def get_vm_list # read subdirectories from virtual machines root directory
-		vm_list = Dir.entries($params['vm_dir'])
-		vm_list.delete('.')
-		vm_list.delete('..')
+		vm_array = Dir.entries($params['vm_dir'])
+		vm_array.delete('.')
+		vm_array.delete('..')
+		vm_list = Hash.new
+		vm_array.each{|vm|
+			vm_info = Hash.new
+			vm_info['status'] = 'stopped'
+			pid_file = "#{$params['vm_dir']}/#{vm}/#{$params['pid_file']}"
+			socket_file = "#{$params['vm_dir']}/#{vm}/#{$params['socket_file']}"
+			if File.exist?(pid_file) 
+				vm_info['pid'] = IO.read(pid_file).chomp
+				vm_info['status'] = 'running' if IO.read("/proc/#{vm_info['pid']}/statm").split(' ')[2] != 'Z'
+			else
+				vm_info['pid'] = nil
+			end
+			if File.exist?(socket_file)
+				vm_info['socket'] = socket_file
+			else
+				vm_info['socket'] = nil
+			end
+			vm_list[vm] = vm_info
+		}
 		vm_list
 	end
+
+private
 
 	def read_start_script(file) # read script that start virtual machine from virtual machine folder
 		start_cmd = nil
 		IO.read(file).each_line{|line|
 			if line.index('#') != 0
 				start_cmd = line.delete('&')
-				#start_cmd = start_cmd.split(' ')
+				start_cmd = start_cmd.split(' ')
 				break
 			end
 		}
@@ -236,6 +268,7 @@ begin
 		get_program_root_dir!
 		read_conf!
 		spkvmd = SPKVMD.new
+		spkvmd.refresh_kvm_vm_list!
 		spkvmd.accept_sessions!
 	else
 		raise "Only for Linux"
