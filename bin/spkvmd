@@ -82,7 +82,7 @@ end
 class Listner # class to operate with TCP Server
 	def initialize
 		begin
-			puts "Starting SPKVM Listner..."
+			puts "Starting SPKVMD Listner..."
 			require 'socket'
 			@server = TCPServer.new($params['tcp_addr'],$params['tcp_port'])
 		rescue
@@ -105,7 +105,7 @@ end
 class Watcher # class to operate with Virtual Machines list
 	def self.start!
 		begin
-			puts "Starting SPKVM Watcher..."
+			puts "Starting SPKVMD Watcher..."
 			@kvm = KVM.new
 			loop do
 				self.refresh!
@@ -169,7 +169,12 @@ private
 					break
 				elsif cmd == 'list'
 					vm_list = $kvm_vm_list
-					puts "\t\t\t[#{Thread.current}] - #{vm_list.length} vms ilisted to client."
+					puts "\t\t\t[#{Thread.current}] - #{vm_list.length} vms listed to client."
+					puts_to_c(vm_list)
+				elsif cmd == 'flist'
+					Watcher.refresh!
+					vm_list = $kvm_vm_list
+					puts "\t\t\t[#{Thread.current}] - List updated. #{vm_list.length} vms listed to client."
 					puts_to_c(vm_list)
 				elsif cmd == 'start'
 					begin
@@ -268,38 +273,56 @@ class KVM # class to work with KVM
 	def config(vm) # configure virtual machine
 	end
 
-	def get_vm_list # read subdirectories from virtual machines root directory
-		vm_array = Dir.entries($params['vm_dir'])
-		vm_array.delete('.')
-		vm_array.delete('..')
+	def get_vm_list # get list of VM and different information about them
 		vm_list = Hash.new
-		vm_array.each{|vm|
+		read_vm_dir.each{|vm|
 			vm_info = Hash.new
-			vm_info['status'] = 'stopped'
-			pid_file = "#{$params['vm_dir']}/#{vm}/#{$params['pid_file']}"
-			socket_file = "#{$params['vm_dir']}/#{vm}/#{$params['socket_file']}"
-			if File.exist?(pid_file) 
-				vm_info['pid_file'] = pid_file
-				vm_info['pid'] = IO.read(pid_file).chomp.to_i
-				pid_stat_file = "/proc/#{vm_info['pid']}/statm"
-				if File.exist?(pid_stat_file)
-					vm_info['status'] = 'running' if IO.read(pid_stat_file).split(' ')[2] != 'Z'
-				end
-			else
-				vm_info['pid_file'] = nil
-				vm_info['pid'] = nil
-			end
-			if File.exist?(socket_file)
-				vm_info['socket'] = socket_file
-			else
-				vm_info['socket'] = nil
-			end
+
+			vm_info['status'], vm_info['pid_file'], vm_info['pid'] = get_process_status(vm)
+			vm_info['socket'] = get_socket_file(vm)
+			
 			vm_list[vm] = vm_info
 		}
 		vm_list
 	end
 
 private
+
+	def read_vm_dir # read subdirectories from virtual machines root directory
+		vm_array = Dir.entries($params['vm_dir'])
+		vm_array.delete('.')
+		vm_array.delete('..')
+		vm_array
+	end
+
+	def get_process_status(vm) # find pid file, pid and detect status of VM
+		pid_file = "#{$params['vm_dir']}/#{vm}/#{$params['pid_file']}"
+		status = 'stopped'
+		if File.exist?(pid_file) 
+			pid = IO.read(pid_file).chomp.to_i
+			pid_stat_file = "/proc/#{pid}/statm"
+			if Dir.exist?('/proc')
+				if File.exist?(pid_stat_file)
+					status = 'running' if IO.read(pid_stat_file).split(' ')[2] != 'Z'
+				else
+					File.delete(pid_file)
+					pid_file = nil
+					pid = nil
+				end
+			else
+				raise "proc directory not found. Is it Linux?"
+			end
+		else
+			pid_file = nil
+			pid = nil
+		end
+		return status, pid_file, pid
+	end
+
+	def get_socket_file(vm) # detect socket file
+		socket_file = "#{$params['vm_dir']}/#{vm}/#{$params['socket_file']}"
+        File.socket?(socket_file) ? socket_file : nil
+	end
 
 	def read_start_script(file) # read script that start virtual machine from virtual machine folder
 		start_cmd = nil
