@@ -106,7 +106,7 @@ class Watcher # class to operate with Virtual Machines list
 	def self.start!
 		begin
 			puts "Starting SPKVMD Watcher..."
-			@kvm = KVM.new
+			@kvm = KVM.new if !@kvm
 			loop do
 				self.refresh!
 				#puts "\t#{Time.now} - [KVM_VM_UPDATER] KVM VM list updated."
@@ -152,7 +152,7 @@ class Session # class to work with sessions
 private
 
 	def read_s # format input from session
-		@session.gets.chomp.split
+		@session.gets.chomp.split(' ', 3)
 	end
 
 	def operate_kvm # KVM operations
@@ -162,7 +162,7 @@ private
 		begin
 			kvm = KVM.new
 			loop do
-				cmd, arg = read_s
+				cmd, vm, arg = read_s
 				if cmd == 'back'
 					return_to_lvl!
 					puts "\t\t[#{Thread.current}] - exit #{@previous_lvl}"
@@ -178,7 +178,6 @@ private
 					puts_to_c(vm_list)
 				elsif cmd == 'start'
 					begin
-						vm = arg
 						print "\t\t\t[#{Thread.current}] - starting VM=#{vm} - " 
 						result = kvm.start(vm)
 						if result == []
@@ -195,7 +194,6 @@ private
 					end
 				elsif cmd == 'stop'
 					begin
-						vm = arg
 						kvm.stop(vm)
 						puts "\t\t\t[#{Thread.current}] - VM=#{vm} stoped."
 						puts_to_c("#{vm} - stoped")
@@ -204,6 +202,17 @@ private
 						error = $!
 						puts "\t\t\t[#{Thread.current}] - Can't stop VM=#{vm}: #{error}."
 						puts_to_c("#{vm} - failed to stop: #{error}")
+					end
+				elsif cmd == 'console'
+					begin
+						puts "\t\t\t[#{Thread.current}] - \"#{arg}\" command sended to VM=#{vm} console."
+						responce = kvm.console(vm, arg)
+						puts "\t\t\t[#{Thread.current}] - VM=#{vm} return \"#{responce}\" to \"#{arg}\" command."
+						puts_to_c("#{vm} - #{responce}")
+					rescue
+						error = $!
+						puts "\t\t\t[#{Thread.current}] - Can't connect to VM=#{vm} console: #{error}."
+						puts_to_c("#{vm} - failed to connect to console: #{error}")
 					end
 				else
 					puts_to_c('Unknown command')
@@ -271,6 +280,16 @@ class KVM # class to work with KVM
 	end
 
 	def config(vm) # configure virtual machine
+	end
+
+	def console(vm, cmd)
+		vm_info = $kvm_vm_list[vm]
+		s = UNIXSocket.new(vm_info['socket'])
+		s.puts(cmd)
+
+		while(line = s.gets) do
+			puts line
+		end
 	end
 
 	def get_vm_list # get list of VM and different information about them
