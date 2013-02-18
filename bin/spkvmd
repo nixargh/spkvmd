@@ -177,32 +177,13 @@ private
 					puts "\t\t\t[#{Thread.current}] - List updated. #{vm_list.length} vms listed to client."
 					puts_to_c(vm_list)
 				elsif cmd == 'start'
-					begin
-						print "\t\t\t[#{Thread.current}] - starting VM=#{vm} - " 
-						result = kvm.start(vm)
-						if result == []
-							puts "[OK]"
-							puts_to_c("#{vm} - started")
-							Watcher.refresh!
-						else
-							raise result.to_s
-						end
-					rescue
-						error = $!
-						puts "[FAILED] (#{error})"
-						puts_to_c("#{vm} - failed to start: #{error}")
-					end
+					operation(vm, cmd){|i| kvm.start(i) }
 				elsif cmd == 'stop'
-					begin
-						kvm.stop(vm)
-						puts "\t\t\t[#{Thread.current}] - VM=#{vm} stoped."
-						puts_to_c("#{vm} - stoped")
-						Watcher.refresh!
-					rescue
-						error = $!
-						puts "\t\t\t[#{Thread.current}] - Can't stop VM=#{vm}: #{error}."
-						puts_to_c("#{vm} - failed to stop: #{error}")
-					end
+					operation(vm, cmd){|i| kvm.stop(i) }
+				elsif cmd == 'pause'
+					operation(vm, cmd){|i| kvm.pause(i) }
+				elsif cmd == 'resume'
+					operation(vm, cmd){|i| kvm.resume(i) }
 				elsif cmd == 'console'
 					begin
 						puts "\t\t\t[#{Thread.current}] - \"#{arg}\" command sended to VM=#{vm} console."
@@ -222,6 +203,22 @@ private
 		rescue
 			puts "KVM_OPERATOR error: #{$!}"
 			puts $!.backtrace
+		end
+	end
+
+	def operation(vm, o_name) # do 'yield' operation with 'vm' and talk about it as about 'o_name'
+		begin
+			yield(vm)
+			i = o_name.rindex('e')
+
+			o_name.slice!(i) if i == o_name.length - 1
+			puts "\t\t\t[#{Thread.current}] - VM=#{vm} #{o_name}ed."
+			puts_to_c("#{vm} - #{o_name}ed")
+			Watcher.refresh!
+		rescue
+			error = $!
+			puts "\t\t\t[#{Thread.current}] - Can't #{o_name} VM=#{vm}: #{error}."
+			puts_to_c("#{vm} - failed to #{o_name}: #{error}")
 		end
 	end
 
@@ -265,13 +262,18 @@ class KVM # class to work with KVM
 	end
 
 	def start(vm) # start virtual machine
-		result = nil
-		start_script = "#{$params['vm_dir']}/#{vm}/#{$params['start_script']}"
-		start_cmd =  read_start_script(start_script)
-		IO.popen([*start_cmd, :err=>[:child, :out]]){|io|
-			result = io.readlines
-		}
-		result
+		vm_info = $kvm_vm_list[vm]
+		if (status = vm_info['status']) == 'stopped'
+			result = nil
+			start_script = "#{$params['vm_dir']}/#{vm}/#{$params['start_script']}"
+			start_cmd =  read_start_script(start_script)
+			IO.popen([*start_cmd, :err=>[:child, :out]]){|io|
+				result = io.readlines
+			}
+			result == [] ? (return true) : (raise result.to_s)
+		else
+			raise "VM status = \"#{status}\""
+		end
 	end
 
 	def stop(vm) # stop virtual machine
@@ -280,6 +282,21 @@ class KVM # class to work with KVM
 		File.delete(vm_info['pid_file']) if vm_info['pid_file']
 	end
 
+	def pause(vm)
+		if (result = console(vm, 'stop')) == []
+			return true
+		else
+			raise result
+		end
+	end
+
+	def resume(vm)
+		if (result = console(vm, 'cont')) == []
+			return true
+		else
+			raise result
+		end
+	end
 
 	def console(vm, cmd) # communicate with VM console (-monitor)
 		vm_info = $kvm_vm_list[vm]
@@ -352,7 +369,13 @@ private
 			pid_stat_file = "/proc/#{pid}/statm"
 			if Dir.exist?('/proc')
 				if File.exist?(pid_stat_file)
-					status = 'running' if IO.read(pid_stat_file).split(' ')[2] != 'Z'
+					if IO.read(pid_stat_file).split(' ')[2] != 'Z'
+						if $kvm_vm_list
+							status = (console(vm, 'info status')[0].split(': '))[1]
+						else
+							status = 'running (maybe paused)'
+						end
+					end
 				else
 					File.delete(pid_file)
 					pid_file = nil
