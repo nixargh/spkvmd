@@ -212,6 +212,7 @@ private
 					rescue
 						error = $!
 						puts "\t\t\t[#{Thread.current}] - Can't connect to VM=#{vm} console: #{error}."
+						puts $!.backtrace
 						puts_to_c("#{vm} - failed to connect to console: #{error}")
 					end
 				else
@@ -279,17 +280,20 @@ class KVM # class to work with KVM
 		File.delete(vm_info['pid_file']) if vm_info['pid_file']
 	end
 
-	def config(vm) # configure virtual machine
-	end
 
-	def console(vm, cmd)
+	def console(vm, cmd) # communicate with VM console (-monitor)
 		vm_info = $kvm_vm_list[vm]
 		s = UNIXSocket.new(vm_info['socket'])
-		s.puts(cmd)
 
-		while(line = s.gets) do
-			puts line
-		end
+		s.puts(cmd)
+		sleep 0.5
+		
+		string_responce = read_socket(s)
+
+		s.flush
+		s.close
+		
+		format_responce(string_responce)
 	end
 
 	def get_vm_list # get list of VM and different information about them
@@ -305,7 +309,33 @@ class KVM # class to work with KVM
 		vm_list
 	end
 
+	def show_config(vm) # show virtual machine configuration
+	end
+	
+	def edit_config(vm) # edit virtual machine configuration
+	end
+
 private
+	
+	def read_socket(socket)
+		string_responce = String.new
+		while output = socket.recv(128) do
+			string_responce << output
+			break if string_responce.scan("(qemu) ").count == 2
+		end
+		string_responce
+	end
+
+	def format_responce(string)
+		new_string = (string.split("(qemu) "))[1]
+		responce = Array.new
+		c = 0
+		new_string.each_line{|line|
+			c += 1
+			responce.push(line.chomp.strip) if c > 1
+		}
+		responce
+	end
 
 	def read_vm_dir # read subdirectories from virtual machines root directory
 		vm_array = Dir.entries($params['vm_dir'])
