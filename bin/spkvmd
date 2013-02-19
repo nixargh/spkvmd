@@ -2,7 +2,7 @@
 # encoding: utf-8
 # small personal kvm daemon
 # (*w)
-VERSION = "0.0.4"
+VERSION = "0.1.0"
 ##### SETTINGS #####################################################
 $params = nil
 $kvm_vm_list = nil
@@ -209,9 +209,11 @@ private
 	def operation(vm, o_name) # do 'yield' operation with 'vm' and talk about it as about 'o_name'
 		begin
 			yield(vm)
-			i = o_name.rindex('e')
-
-			o_name.slice!(i) if i == o_name.length - 1
+			if (i = o_name.rindex('e'))
+				o_name.slice!(i) if i == o_name.length - 1
+			elsif (i = o_name.rindex('p'))
+				o_name = o_name + 'p' if i == o_name.length - 1
+			end
 			puts "\t\t\t[#{Thread.current}] - VM=#{vm} #{o_name}ed."
 			puts_to_c("#{vm} - #{o_name}ed")
 			Watcher.refresh!
@@ -278,8 +280,12 @@ class KVM # class to work with KVM
 
 	def stop(vm) # stop virtual machine
 		vm_info = $kvm_vm_list[vm]
-		Process.kill(15, vm_info['pid'])
-		File.delete(vm_info['pid_file']) if vm_info['pid_file']
+		if (status = vm_info['status']) != 'stopped'
+			Process.kill(15, vm_info['pid'])
+			File.delete(vm_info['pid_file']) if vm_info['pid_file']
+		else
+			raise "VM status = \"#{status}\""
+		end
 	end
 
 	def pause(vm)
