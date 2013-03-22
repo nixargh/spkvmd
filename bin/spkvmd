@@ -68,15 +68,19 @@ class SPKVMD # main class
 		end
 	end
 
-	def start_Listner! # start spkvmd listner
+	def start_listners! # start spkvmd listner
 		require 'Listner'
 		Thread.new do
-			listner = Listner.new
-			listner.accept_sessions!
+			listner = Listner.new('Web', $params['web_listner_tcp_port'])
+			listner.accept_web_sessions!
+		end
+		Thread.new do
+			listner = Listner.new('Interactive', $params['interactive_listner_tcp_port'])
+			listner.accept_interactive_sessions!
 		end
 	end
 
-	def start_Watcher! # start spkvmd watcher that monitor VM statuses
+	def start_watcher! # start spkvmd watcher that monitor VM statuses
 		require 'Watcher'
 		Thread.new do
 			Watcher.start!
@@ -95,8 +99,8 @@ begin
 		spkvmd.get_program_root_dir!
 		spkvmd.read_conf!
 		spkvmd.add_library!
-		spkvmd.start_Watcher!
-		spkvmd.start_Listner!
+		spkvmd.start_watcher!
+		spkvmd.start_listners!
 		spkvmd.wait_all!
 	else
 		raise "Only for Linux"

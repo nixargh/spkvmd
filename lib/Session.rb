@@ -1,26 +1,37 @@
 class Session # class to work with sessions
-	def initialize(session)
+	def initialize(session, interactive)
 		@current_lvl = 'ROOT'
 		@previous_lvl = nil
 		@session = session
+		@interactive = interactive
 		begin
 			puts "\t[#{Thread.current}] - session opened"
-			@session.puts("-= spkvmd welcome you =-")
-			loop do
-				puts_to_c(nil)
-				cmd, arg = read_s
-				if cmd == 'quit'
-					break
-				elsif cmd == 'kvm'
-					operate_kvm
-				elsif cmd == 'ks'
-					exit
-				else
-					puts_to_c('Unknown command')
+			if @interactive
+				@session.puts("-= spkvmd welcome you =-") 
+				loop do
+					puts_to_c(nil)
+					cmd, arg = read_s
+					if cmd == 'quit'
+						break
+					elsif cmd == 'kvm'
+						operate_kvm
+					elsif cmd == 'ks'
+						exit
+					else
+						puts_to_c('Unknown command')
+					end
+				end
+			else
+				main_cmd, operate_cmd, params = read_s
+				# puts "#{main_cmd} then #{operate_cmd} with params = #{params}"
+				if main_cmd == 'kvm'
+					vm, arg = params.split(' ', 2)
+					run_kvm_operation(operate_cmd, vm, arg)
 				end
 			end
 		rescue
 			puts "session initialize error: #{$!}"
+			puts $!.backtrace
 		end
 	end
 
@@ -35,44 +46,14 @@ private
 		puts "\t\t[#{Thread.current}] - enter #{@current_lvl}"
 		puts_to_c(nil)
 		begin
-			kvm = KVM.new
 			loop do
 				cmd, vm, arg = read_s
 				if cmd == 'back'
 					return_to_lvl!
 					puts "\t\t[#{Thread.current}] - exit #{@previous_lvl}"
 					break
-				elsif cmd == 'list'
-					vm_list = $kvm_vm_list
-					puts "\t\t\t[#{Thread.current}] - #{vm_list.length} vms listed to client."
-					puts_to_c(vm_list)
-				elsif cmd == 'flist'
-					Watcher.refresh!
-					vm_list = $kvm_vm_list
-					puts "\t\t\t[#{Thread.current}] - List updated. #{vm_list.length} vms listed to client."
-					puts_to_c(vm_list)
-				elsif cmd == 'start'
-					operation(vm, cmd){|i| kvm.start(i) }
-				elsif cmd == 'stop'
-					operation(vm, cmd){|i| kvm.stop(i) }
-				elsif cmd == 'pause'
-					operation(vm, cmd){|i| kvm.pause(i) }
-				elsif cmd == 'resume'
-					operation(vm, cmd){|i| kvm.resume(i) }
-				elsif cmd == 'console'
-					begin
-						puts "\t\t\t[#{Thread.current}] - \"#{arg}\" command sended to VM=#{vm} console."
-						responce = kvm.console(vm, arg)
-						puts "\t\t\t[#{Thread.current}] - VM=#{vm} return \"#{responce}\" to \"#{arg}\" command."
-						puts_to_c("#{vm} - #{responce}")
-					rescue
-						error = $!
-						puts "\t\t\t[#{Thread.current}] - Can't connect to VM=#{vm} console: #{error}."
-						puts $!.backtrace
-						puts_to_c("#{vm} - failed to connect to console: #{error}")
-					end
 				else
-					puts_to_c('Unknown command')
+					run_kvm_operation(cmd, vm, arg)
 				end
 			end
 		rescue
@@ -80,6 +61,44 @@ private
 			puts $!.backtrace
 		end
 	end
+
+	def run_kvm_operation(cmd, vm, arg)
+		require 'KVM'
+		kvm = KVM.new
+		if cmd == 'list'
+			vm_list = $kvm_vm_list
+			puts "\t\t\t[#{Thread.current}] - #{vm_list.length} vms listed to client."
+			puts_to_c(vm_list)
+		elsif cmd == 'flist'
+			Watcher.refresh!
+			vm_list = $kvm_vm_list
+			puts "\t\t\t[#{Thread.current}] - List updated. #{vm_list.length} vms listed to client."
+			puts_to_c(vm_list)
+		elsif cmd == 'start'
+			operation(vm, cmd){|i| kvm.start(i) }
+		elsif cmd == 'stop'
+			operation(vm, cmd){|i| kvm.stop(i) }
+		elsif cmd == 'pause'
+			operation(vm, cmd){|i| kvm.pause(i) }
+		elsif cmd == 'resume'
+			operation(vm, cmd){|i| kvm.resume(i) }
+		elsif cmd == 'console'
+			begin
+				puts "\t\t\t[#{Thread.current}] - \"#{arg}\" command sended to VM=#{vm} console."
+				responce = kvm.console(vm, arg)
+				puts "\t\t\t[#{Thread.current}] - VM=#{vm} return \"#{responce}\" to \"#{arg}\" command."
+				puts_to_c("#{vm} - #{responce}")
+			rescue
+				error = $!
+				puts "\t\t\t[#{Thread.current}] - Can't connect to VM=#{vm} console: #{error}."
+				#puts $!.backtrace
+				puts_to_c("#{vm} - failed to connect to console: #{error}")
+			end
+		else
+			puts_to_c('Unknown command')
+		end
+	end
+
 
 	def operation(vm, o_name) # do 'yield' operation with 'vm' and talk about it as about 'o_name'
 		begin
