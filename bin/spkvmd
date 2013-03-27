@@ -107,5 +107,5 @@ begin
 	end
 rescue
 	puts $!
-	puts $!.backtrace if debug
+	puts $!.backtrace
 end

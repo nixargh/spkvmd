@@ -25,8 +25,12 @@ class Session # class to work with sessions
 				main_cmd, operate_cmd, params = read_s
 				# puts "#{main_cmd} then #{operate_cmd} with params = #{params}"
 				if main_cmd == 'kvm'
-					vm, arg = params.split(' ', 2)
-					run_kvm_operation(operate_cmd, vm, arg)
+					if params
+						vm, arg = params.split(' ', 2)
+						run_kvm_operation(operate_cmd, vm, arg)
+					else
+						run_kvm_operation(operate_cmd, vm)
+					end
 				end
 			end
 		rescue
@@ -38,7 +42,8 @@ class Session # class to work with sessions
 private
 
 	def read_s # format input from session
-		@session.gets.chomp.split(' ', 3)
+		info = @session.gets
+		info.chomp.split(' ', 3) if info
 	end
 
 	def operate_kvm # KVM operations
@@ -62,7 +67,7 @@ private
 		end
 	end
 
-	def run_kvm_operation(cmd, vm, arg)
+	def run_kvm_operation(cmd, vm, *arg)
 		require 'KVM'
 		kvm = KVM.new
 		if cmd == 'list'
