@@ -24,6 +24,7 @@ private
 			require 'Session'
 			Thread.abort_on_exception=true
 			Thread.start(@server.accept) do |session|
+				puts "\t[#{Thread.current}] - new session"
 				if	type == 'web'
 					Session.new(session, false)
 				elsif type == 'interactive'
