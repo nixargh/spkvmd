@@ -90,6 +90,7 @@ class KVM # class to work with KVM
 	end
 
 	def show_config(vm) # show virtual machine configuration
+		read_config_file(vm)
 	end
 	
 	def edit_config(vm) # edit virtual machine configuration
@@ -171,4 +172,18 @@ private
 		start_cmd ? start_cmd : raise("VM starting string not found")
 	end
 
+	def read_config_file(vm) # reads VM configuration file from virtual machine folder
+		conf_file = "#{$params['vm_dir']}/#{vm}/#{$params['config']}"
+		config = Hash.new
+		IO.read(conf_file).each_line{|line|
+			line = line.split(' ')
+			line[1] = true if line[1] == nil
+			if config.has_key?(line[0])
+				config[line[0]].push(line[1])
+			else
+				config[line[0]] = [line[1]]
+			end
+		}
+		config
+	end
 end

@@ -1,5 +1,6 @@
 class Session # class to work with sessions
 	def initialize(session, interactive)
+		require 'json'
 		@session = session
 		@interactive = interactive
 		begin
@@ -49,12 +50,12 @@ private
 		if cmd == 'list'
 			vm_list = $kvm_vm_list
 			puts "\t\t\t[#{Thread.current}] - #{vm_list.length} vms listed to client."
-			puts_to_c([0, vm_list])
+			puts_to_c([0, vm_list.to_json])
 		elsif cmd == 'flist'
 			Watcher.refresh!
 			vm_list = $kvm_vm_list
 			puts "\t\t\t[#{Thread.current}] - List updated. #{vm_list.length} vms listed to client."
-			puts_to_c([0, vm_list])
+			puts_to_c([0, vm_list.to_json])
 		elsif cmd == 'start'
 			operation(vm, cmd){|i| kvm.start(i) }
 		elsif cmd == 'stop'
@@ -74,6 +75,16 @@ private
 				puts "\t\t\t[#{Thread.current}] - Can't connect to VM=#{vm} console: #{error}."
 				#puts error.backtrace
 				puts_to_c([1, "failed to connect to console: #{error}"])
+			end
+		elsif cmd == 'showconfig'
+			begin
+				config = kvm.show_config(vm)
+				puts "\t\t\t[#{Thread.current}] - \"#{vm}\" configuration showed to client."
+				puts_to_c([0, config.to_json])
+			rescue
+				error = $!
+				puts "\t\t\t[#{Thread.current}] - failed to show \"#{vm}\" configuration: #{error}."
+				puts_to_c([1, error])
 			end
 		else
 			puts_to_c([2, 'Unknown command'])
